@@ -28,6 +28,23 @@ try {
 
 const db = admin.apps.length > 0 ? admin.firestore() : null;
 
+// 2.5. Load User Configuration
+const configPath = path.join(__dirname, 'config.json');
+let userId = null;
+
+try {
+  const config = require(configPath);
+  userId = config.userId;
+  if (!userId || userId === "REPLACE_WITH_YOUR_FIREBASE_UID") {
+    throw new Error("Placeholder UID detected.");
+  }
+  console.log(`[-] Target Firebase User UID: ${userId}`);
+} catch (error) {
+  console.error('[ERROR] Failed to load config.json or valid userId.');
+  console.error('[INFO] Please open scanner/config.json and paste your Firebase Auth UID from the dashboard.');
+  process.exit(1);
+}
+
 // 3. Subnet Auto-discovery
 function detectSubnet() {
   const interfaces = os.networkInterfaces();
@@ -182,7 +199,7 @@ async function runScan() {
   }
 
   try {
-    const collectionRef = db.collection('network_nodes');
+    const collectionRef = db.collection('users').doc(userId).collection('network_nodes');
     
     // Fetch currently registered nodes from Firestore to check who we need to update/clean up
     const snapshot = await collectionRef.get();
@@ -282,7 +299,7 @@ function startWakeOnLanListener() {
   if (!db) return;
   console.log('[-] Starting Wake-on-LAN listener...');
   
-  db.collection('network_nodes')
+  db.collection('users').doc(userId).collection('network_nodes')
     .where('wake_requested', '==', true)
     .onSnapshot((snapshot) => {
       snapshot.forEach(async (doc) => {
@@ -323,7 +340,7 @@ async function startScanRequestListener() {
   if (!db) return;
   console.log('[-] Starting Scan Request listener...');
   
-  const docRef = db.collection('scanner_control').doc('status');
+  const docRef = db.collection('users').doc(userId).collection('scanner_control').doc('status');
   try {
     const docSnap = await docRef.get();
     if (!docSnap.exists) {

@@ -21,7 +21,7 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
 
   // Listen to manual scan control status
   useEffect(() => {
-    const unsubscribe = onSnapshot(doc(db, "scanner_control", "status"), (docSnap) => {
+    const unsubscribe = onSnapshot(doc(db, "users", user.uid, "scanner_control", "status"), (docSnap) => {
       if (docSnap.exists()) {
         setScanStatus(docSnap.data());
       }
@@ -29,11 +29,11 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
       console.error("Error listening to scanner control status:", error);
     });
     return () => unsubscribe();
-  }, []);
+  }, [user.uid]);
 
   const handleRequestScan = async () => {
     try {
-      const docRef = doc(db, "scanner_control", "status");
+      const docRef = doc(db, "users", user.uid, "scanner_control", "status");
       await updateDoc(docRef, {
         scan_requested: true
       });
@@ -43,7 +43,7 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
   };
 
   useEffect(() => {
-    const q = query(collection(db, "network_nodes"));
+    const q = query(collection(db, "users", user.uid, "network_nodes"));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const nodesData = [];
@@ -144,6 +144,16 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
             <div className="hidden md:flex flex-col items-end text-right text-xs font-mono">
               <span className="font-bold text-zinc-800 dark:text-zinc-200">{user?.displayName || "Admin"}</span>
               <span className="text-zinc-400 dark:text-zinc-500">{user?.email}</span>
+              <button 
+                onClick={() => {
+                  navigator.clipboard.writeText(user.uid);
+                  alert("UID copiado al portapapeles. Pégalo en el config.json de tu escáner.");
+                }}
+                className="text-[9px] text-zinc-500 dark:text-zinc-650 hover:text-red-650 dark:hover:text-red-500 mt-0.5 underline cursor-pointer"
+                title="Haga clic para copiar UID"
+              >
+                UID: {user.uid.substring(0, 8)}...
+              </button>
             </div>
             
             <button
@@ -256,7 +266,7 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
         ) : filteredNodes.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {filteredNodes.map((node) => (
-              <NodeCard key={node.id} node={node} />
+              <NodeCard key={node.id} node={node} userId={user.uid} />
             ))}
           </div>
         ) : (

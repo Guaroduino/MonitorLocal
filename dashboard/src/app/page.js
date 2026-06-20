@@ -11,8 +11,6 @@ import { auth } from "../lib/firebase";
 import Login from "../components/Login";
 import Dashboard from "../components/Dashboard";
 
-const ADMIN_EMAIL_PLACEHOLDER = "coradogranadillo@gmail.com";
-
 export default function Home() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -29,19 +27,7 @@ export default function Home() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        if (currentUser.email === ADMIN_EMAIL_PLACEHOLDER) {
-          setUser(currentUser);
-          setAuthError("");
-        } else {
-          signOut(auth).then(() => {
-            setUser(null);
-            setAuthError(`El correo ${currentUser.email} no está autorizado para acceder a este dashboard.`);
-          });
-        }
-      } else {
-        setUser(null);
-      }
+      setUser(currentUser);
       setLoading(false);
     });
 
@@ -57,14 +43,7 @@ export default function Home() {
     });
 
     try {
-      const result = await signInWithPopup(auth, provider);
-      const loggedInUser = result.user;
-      
-      if (loggedInUser.email !== ADMIN_EMAIL_PLACEHOLDER) {
-        await signOut(auth);
-        setUser(null);
-        setAuthError(`El correo ${loggedInUser.email} no está autorizado para acceder a este dashboard.`);
-      }
+      await signInWithPopup(auth, provider);
     } catch (error) {
       console.error("Error during Google Sign-in:", error);
       if (error.code !== "auth/popup-closed-by-user") {

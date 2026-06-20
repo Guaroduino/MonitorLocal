@@ -29,7 +29,7 @@ function getRelativeTimeString(date) {
   return date.toLocaleDateString();
 }
 
-export default function NodeCard({ node }) {
+export default function NodeCard({ node, userId }) {
   const [isEditing, setIsEditing] = useState(false);
   const [alias, setAlias] = useState(node.custom_name || "");
   const [isSaving, setIsSaving] = useState(false);
@@ -53,7 +53,7 @@ export default function NodeCard({ node }) {
   const handleSaveAlias = async () => {
     setIsSaving(true);
     try {
-      const docRef = doc(db, "network_nodes", node.id);
+      const docRef = doc(db, "users", userId, "network_nodes", node.id);
       await updateDoc(docRef, {
         custom_name: alias.trim() || null
       });
@@ -72,7 +72,7 @@ export default function NodeCard({ node }) {
     if (cleaned.length === 12) {
       const formatted = cleaned.match(/.{1,2}/g).join(":");
       try {
-        const docRef = doc(db, "network_nodes", node.id);
+        const docRef = doc(db, "users", userId, "network_nodes", node.id);
         await updateDoc(docRef, {
           mac_address: formatted
         });
@@ -83,7 +83,7 @@ export default function NodeCard({ node }) {
       }
     } else if (cleaned.length === 0) {
       try {
-        const docRef = doc(db, "network_nodes", node.id);
+        const docRef = doc(db, "users", userId, "network_nodes", node.id);
         await updateDoc(docRef, {
           mac_address: null
         });
@@ -101,7 +101,7 @@ export default function NodeCard({ node }) {
   const handleWakeDevice = async () => {
     setWaking(true);
     try {
-      const docRef = doc(db, "network_nodes", node.id);
+      const docRef = doc(db, "users", userId, "network_nodes", node.id);
       await updateDoc(docRef, {
         wake_requested: true,
         wake_status: "pending"

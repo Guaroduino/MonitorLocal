@@ -16,8 +16,9 @@ jspm_packages/
 out/
 
 # Firebase configuration & secrets
-# CRITICAL: Ignore service account credentials key
+# CRITICAL: Ignore service account credentials key and local user config
 scanner/serviceAccountKey.json
+scanner/config.json
 .firebaserc
 # (We can keep firebase.json as it defines deployment targets, but .firebaserc is optional/can be ignored or kept depending on preference. Keeping firebase.json is normal).
 
