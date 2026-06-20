@@ -13,6 +13,7 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
   const [statusFilter, setStatusFilter] = useState("all");
   const [isSyncing, setIsSyncing] = useState(false);
   const [viewMode, setViewMode] = useState("devices"); // "devices" | "services"
+  const [showCommon, setShowCommon] = useState(false);
   
   const [scanStatus, setScanStatus] = useState({
     scan_requested: false,
@@ -87,20 +88,35 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
     return () => unsubscribe();
   }, []);
 
-  const totalNodes = nodes.length;
-  const onlineNodes = nodes.filter(node => {
+  const COMMON_PORTS = [22, 80, 443];
+
+  const visibleNodes = nodes.filter(node => {
+    if (!showCommon && node.ports && node.ports.length > 0) {
+      const hasOnlyCommon = node.ports.every(port => COMMON_PORTS.includes(port));
+      if (hasOnlyCommon) return false;
+    }
+    return true;
+  }).map(node => {
+    return {
+      ...node,
+      ports: node.ports ? node.ports.filter(port => showCommon || !COMMON_PORTS.includes(port)) : []
+    };
+  });
+
+  const totalNodes = visibleNodes.length;
+  const onlineNodes = visibleNodes.filter(node => {
     const lastSeen = node.last_seen ? node.last_seen.seconds * 1000 : 0;
     return lastSeen && (Date.now() - lastSeen < 10 * 60 * 1000) && node.ports && node.ports.length > 0;
   }).length;
   const offlineNodes = totalNodes - onlineNodes;
   
-  const totalServices = nodes.reduce((acc, node) => {
+  const totalServices = visibleNodes.reduce((acc, node) => {
     const lastSeen = node.last_seen ? node.last_seen.seconds * 1000 : 0;
     const isOnline = lastSeen && (Date.now() - lastSeen < 10 * 60 * 1000);
     return acc + (isOnline && node.ports ? node.ports.length : 0);
   }, 0);
 
-  const filteredNodes = nodes.filter(node => {
+  const filteredNodes = visibleNodes.filter(node => {
     const searchLower = searchTerm.toLowerCase();
     const matchesSearch = 
       node.ip.toLowerCase().includes(searchLower) ||
@@ -290,6 +306,19 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
                 Servicios
               </button>
             </div>
+
+            {/* Common Services Toggle */}
+            <button
+              onClick={() => setShowCommon(!showCommon)}
+              className={`px-3 py-1.5 border rounded-lg text-[10px] font-mono font-bold uppercase transition flex items-center gap-1.5 cursor-pointer ${
+                showCommon 
+                  ? "border-red-600 dark:border-red-500 text-red-650 dark:text-red-500 bg-red-50/50 dark:bg-red-950/10" 
+                  : "border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-zinc-250 hover:bg-zinc-50 dark:hover:bg-zinc-900"
+              }`}
+              title="Mostrar u ocultar servicios comunes (SSH, HTTP, HTTPS)"
+            >
+              <span>SSH/HTTP: {showCommon ? "SÍ" : "NO"}</span>
+            </button>
 
             {/* Manual scan button */}
             <button
