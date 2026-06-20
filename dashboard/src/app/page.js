@@ -17,11 +17,19 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [isDarkMode, setIsDarkMode] = useState(false); // Default to Light Mode
 
-  // Read theme from localStorage on client-side mount
+  // Read theme and register Service Worker on client-side mount
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme");
     if (savedTheme === "dark") {
       setIsDarkMode(true);
+    }
+    
+    // Register PWA Service Worker
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").then(
+        (reg) => console.log("Service Worker registered with scope:", reg.scope),
+        (err) => console.error("Service Worker registration failed:", err)
+      );
     }
   }, []);
 

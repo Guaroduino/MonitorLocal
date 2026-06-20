@@ -14,6 +14,7 @@ const geistMono = Geist_Mono({
 export const metadata = {
   title: "MonitorLocal - Panel de Control de Red",
   description: "Monitoreo en tiempo real de servicios activos en la red local",
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({ children }) {
