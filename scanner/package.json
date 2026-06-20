@@ -1,0 +1,12 @@
+{
+  "name": "monitor-local-scanner",
+  "version": "1.0.0",
+  "description": "Local network scanner for MonitorLocal, reporting to Firebase Firestore",
+  "main": "scanner.js",
+  "scripts": {
+    "start": "node scanner.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  }
+}

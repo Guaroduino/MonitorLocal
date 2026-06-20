@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+body {
+  background-color: #ffffff;
+  color: #09090b;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  transition-property: background-color, color, border-color;
+  transition-duration: 200ms;
+}
+
+.dark body {
+  background-color: #000000;
+  color: #f4f4f5;
+}
+
+/* Minimalist status pulse animations */
+@keyframes pulse-dot-green {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.6;
+  }
+}
+.animate-pulse-green {
+  animation: pulse-dot-green 1.8s infinite ease-in-out;
+}
+
+@keyframes pulse-dot-red {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.6;
+  }
+}
+.animate-pulse-red {
+  animation: pulse-dot-red 1.8s infinite ease-in-out;
+}

@@ -1,0 +1,22 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Strict rules for network monitoring nodes
+    match /network_nodes/{nodeId} {
+      // Only allow access if user is authenticated AND email matches the authorized personal email
+      allow read, write: if request.auth != null && request.auth.token.email == "coradogranadillo@gmail.com";
+    }
+
+    // Rules for scanner control triggers
+    match /scanner_control/{docId} {
+      allow read, write: if request.auth != null && request.auth.token.email == "coradogranadillo@gmail.com";
+    }
+    
+    // Default deny for everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
