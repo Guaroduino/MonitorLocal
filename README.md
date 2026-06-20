@@ -12,6 +12,9 @@
 *   **Escaneo a Petición (On-Demand):** El escáner corre en segundo plano cada 5 minutos por defecto, pero puedes forzar un escaneo completo de red de manera instantánea desde la interfaz web.
 *   **Resolución de Nombres (DNS Reverso):** Intenta resolver de forma automática los nombres de host locales (ej. `Luis-PC`, `comfy-server`) a través del DNS de tu red.
 *   **Nombres/Alias Personalizables:** Asigna alias fáciles de recordar a cada IP directamente desde el dashboard (ej. "Mi Servidor de IA"). Los alias se guardan en la nube y no se pierden en nuevos escaneos.
+*   **Vistas de Dispositivos y Servicios:** Alterna el dashboard para ver la red ordenada por nodos tradicionales, o agrupada directamente por servicios activos (ComfyUI, Ollama, Open WebUI, SSH, HTTP, HTTPS).
+*   **Filtro Inteligente de Puertos Comunes (SSH/HTTP):** Filtro toggle para ocultar puertos SSH (22), HTTP (80) y HTTPS (443). Si un dispositivo encendido solo cuenta con estos puertos genéricos abiertos, se oculta por completo del panel para evitar ruidos y concentrarse en servicios de IA locales.
+*   **Acceso Directo Web:** Desde la vista de servicios, las tarjetas de servicios web (HTTP, HTTPS, ComfyUI, Ollama y Open WebUI) incluyen un botón de acceso directo para abrir la app web del dispositivo en el navegador en un clic.
 *   **Arquitectura Multiusuario Aislada:** Los datos se estructuran de forma aislada por el `UID` de autenticación de Google de cada usuario (`/users/{userId}/...`). Dos personas pueden usar el mismo proyecto de Firebase y ver solo sus redes correspondientes sin interferencias.
 *   **Diseño Industrial Minimalista:** Interfaz limpia en blanco y negro con resaltados en rojo. Soporta modo oscuro manual persisted en el navegador a través de `localStorage`.
 *   **PWA Completa (Progressive Web App):** Cumple con los requisitos de Service Worker y manifiesto para ser instalable como una aplicación nativa en tu computadora o dispositivo móvil.
