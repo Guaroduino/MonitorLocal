@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { collection, onSnapshot, query, doc, updateDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import NodeCard from "./NodeCard";
-import { LogOut, Search, Activity, Network, ServerCrash, RefreshCw, Sun, Moon } from "lucide-react";
+import { LogOut, Search, Activity, Network, ServerCrash, RefreshCw, Sun, Moon, ExternalLink } from "lucide-react";
 
 export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }) {
   const [nodes, setNodes] = useState([]);
@@ -12,6 +12,7 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [viewMode, setViewMode] = useState("devices"); // "devices" | "services"
   
   const [scanStatus, setScanStatus] = useState({
     scan_requested: false,
@@ -112,6 +113,35 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
     if (statusFilter === "offline") return matchesSearch && !isOnline;
     return matchesSearch;
   });
+
+  const getGroupedServices = () => {
+    const servicesMap = {
+      11434: { name: "Ollama", port: 11434, devices: [] },
+      8188: { name: "ComfyUI", port: 8188, devices: [] },
+      3000: { name: "Open WebUI", port: 3000, devices: [] },
+      22: { name: "SSH", port: 22, devices: [] },
+      80: { name: "HTTP", port: 80, devices: [] },
+      443: { name: "HTTPS", port: 443, devices: [] }
+    };
+
+    filteredNodes.forEach(node => {
+      const lastSeen = node.last_seen ? node.last_seen.seconds * 1000 : 0;
+      const isOnline = lastSeen && (Date.now() - lastSeen < 10 * 60 * 1000) && node.ports && node.ports.length > 0;
+      
+      if (isOnline && node.ports && node.ports.length > 0) {
+        node.ports.forEach(port => {
+          if (servicesMap[port]) {
+            servicesMap[port].devices.push(node);
+          } else {
+            servicesMap[port] = { name: `Puerto ${port}`, port: port, devices: [] };
+            servicesMap[port].devices.push(node);
+          }
+        });
+      }
+    });
+
+    return Object.values(servicesMap).filter(service => service.devices.length > 0);
+  };
 
   return (
     <div className="min-h-screen bg-white dark:bg-black text-zinc-900 dark:text-zinc-100 flex flex-col pb-12 transition-colors duration-200">
@@ -241,6 +271,26 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
               </button>
             </div>
 
+            {/* View Mode Toggle */}
+            <div className="flex border border-zinc-200 dark:border-zinc-800 p-0.5 rounded-lg bg-white dark:bg-black font-mono text-[10px] font-bold uppercase">
+              <button
+                onClick={() => setViewMode("devices")}
+                className={`px-3 py-1.5 rounded transition cursor-pointer ${
+                  viewMode === "devices" ? "bg-red-600 text-white" : "text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200"
+                }`}
+              >
+                Dispositivos
+              </button>
+              <button
+                onClick={() => setViewMode("services")}
+                className={`px-3 py-1.5 rounded transition cursor-pointer ${
+                  viewMode === "services" ? "bg-red-600 text-white" : "text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200"
+                }`}
+              >
+                Servicios
+              </button>
+            </div>
+
             {/* Manual scan button */}
             <button
               onClick={handleRequestScan}
@@ -257,29 +307,112 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
           </div>
         </div>
 
-        {/* Nodes Grid */}
+        {/* Grid - Nodes or Services */}
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20">
             <div className="w-6 h-6 border-2 border-zinc-200 dark:border-zinc-800 border-t-red-600 rounded-full animate-spin mb-3"></div>
             <p className="text-zinc-400 dark:text-zinc-500 text-xs font-mono">Cargando...</p>
           </div>
-        ) : filteredNodes.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filteredNodes.map((node) => (
-              <NodeCard key={node.id} node={node} userId={user.uid} />
-            ))}
-          </div>
+        ) : viewMode === "devices" ? (
+          filteredNodes.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {filteredNodes.map((node) => (
+                <NodeCard key={node.id} node={node} userId={user.uid} />
+              ))}
+            </div>
+          ) : (
+            <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl p-12 text-center flex flex-col items-center justify-center bg-white dark:bg-black font-mono">
+              <ServerCrash className="w-8 h-8 text-zinc-300 dark:text-zinc-700 mb-2" />
+              <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-widest mb-1">sin nodos</h4>
+              <p className="text-[11px] text-zinc-400 dark:text-zinc-500 max-w-xs">
+                No hay dispositivos registrados en Firestore para la búsqueda actual.
+              </p>
+            </div>
+          )
         ) : (
-          <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl p-12 text-center flex flex-col items-center justify-center bg-white dark:bg-black font-mono">
-            <ServerCrash className="w-8 h-8 text-zinc-300 dark:text-zinc-700 mb-2" />
-            <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-widest mb-1">sin nodos</h4>
-            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 max-w-xs">
-              No hay dispositivos registrados en Firestore para la búsqueda actual.
-            </p>
-          </div>
+          getGroupedServices().length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {getGroupedServices().map((service) => (
+                <ServiceCard key={service.port} service={service} />
+              ))}
+            </div>
+          ) : (
+            <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl p-12 text-center flex flex-col items-center justify-center bg-white dark:bg-black font-mono">
+              <ServerCrash className="w-8 h-8 text-zinc-300 dark:text-zinc-700 mb-2" />
+              <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-widest mb-1">sin servicios</h4>
+              <p className="text-[11px] text-zinc-400 dark:text-zinc-500 max-w-xs">
+                No hay servicios activos corriendo en la red para la búsqueda actual.
+              </p>
+            </div>
+          )
         )}
 
       </main>
+    </div>
+  );
+}
+
+function ServiceCard({ service }) {
+  return (
+    <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 bg-white dark:bg-black transition-colors duration-200 flex flex-col justify-between min-h-[200px] hover:border-red-600 dark:hover:border-red-500 group">
+      <div>
+        {/* Title: Service Name & Port in red */}
+        <div className="flex items-center justify-between mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+          <h3 className="font-mono text-sm font-bold tracking-tight text-zinc-950 dark:text-zinc-50 flex items-center gap-2">
+            <span>{service.name}</span>
+            <span className="text-red-650 dark:text-red-500 font-extrabold font-mono text-xs">
+              :{service.port}
+            </span>
+          </h3>
+          <span className="text-[9px] font-mono uppercase bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-2 py-0.5 rounded text-zinc-500 dark:text-zinc-400 font-bold">
+            {service.devices.length} {service.devices.length === 1 ? 'equipo' : 'equipos'}
+          </span>
+        </div>
+
+        {/* List of active nodes running this service */}
+        <div className="space-y-3 font-mono">
+          {service.devices.map((device) => {
+            const displayTitle = device.custom_name || device.hostname || device.ip;
+            const hasSubLabel = device.custom_name || device.hostname;
+            const isWeb = [80, 443, 3000, 8188, 11434].includes(service.port);
+            const protocol = service.port === 443 ? "https" : "http";
+            const url = `${protocol}://${device.ip}:${service.port}`;
+
+            return (
+              <div 
+                key={device.id} 
+                className="flex items-start justify-between gap-2 p-2 border border-zinc-100 dark:border-zinc-900 rounded-lg hover:border-zinc-200 dark:hover:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20 transition-colors"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                    <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate block">
+                      {displayTitle}
+                    </span>
+                  </div>
+                  {hasSubLabel && (
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block ml-3">
+                      {device.ip}
+                    </span>
+                  )}
+                </div>
+
+                {isWeb && (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-400 hover:text-red-650 dark:hover:text-red-500 rounded border border-transparent hover:border-zinc-250 dark:hover:border-zinc-850 transition cursor-pointer"
+                    title={`Abrir ${service.name} en el navegador`}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
