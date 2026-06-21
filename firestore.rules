@@ -3,11 +3,78 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Allow users full access to all documents and subcollections in their own user tree
-    match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // Función auxiliar para verificar autenticación del propietario
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Reglas para nodos de red
+    match /users/{userId}/network_nodes/{ip} {
+      allow read: if isOwner(userId);
+      allow delete: if isOwner(userId);
+      
+      allow create: if isOwner(userId)
+        && (!request.resource.data.keys().hasAny(['ports', 'last_seen', 'hostname', 'ip']))
+        && (
+          !request.resource.data.keys().hasAny(['custom_name']) 
+          || request.resource.data.custom_name == null 
+          || (request.resource.data.custom_name is string && request.resource.data.custom_name.size() <= 50)
+        )
+        && (
+          !request.resource.data.keys().hasAny(['mac_address']) 
+          || request.resource.data.mac_address == null 
+          || (
+            request.resource.data.mac_address is string 
+            && request.resource.data.mac_address.matches('^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$')
+          )
+        )
+        && (
+          !request.resource.data.keys().hasAny(['wake_requested']) 
+          || request.resource.data.wake_requested is bool
+        )
+        && (
+          !request.resource.data.keys().hasAny(['wake_status']) 
+          || request.resource.data.wake_status in ['pending', 'sent', 'error', 'missing_mac', null]
+        );
+
+      allow update: if isOwner(userId)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['ports', 'last_seen', 'hostname', 'ip']))
+        && (
+          !request.resource.data.keys().hasAny(['custom_name']) 
+          || request.resource.data.custom_name == null 
+          || (request.resource.data.custom_name is string && request.resource.data.custom_name.size() <= 50)
+        )
+        && (
+          !request.resource.data.keys().hasAny(['mac_address']) 
+          || request.resource.data.mac_address == null 
+          || (
+            request.resource.data.mac_address is string 
+            && request.resource.data.mac_address.matches('^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$')
+          )
+        )
+        && (
+          !request.resource.data.keys().hasAny(['wake_requested']) 
+          || request.resource.data.wake_requested is bool
+        )
+        && (
+          !request.resource.data.keys().hasAny(['wake_status']) 
+          || request.resource.data.wake_status in ['pending', 'sent', 'error', 'missing_mac', null]
+        );
     }
     
+    // Reglas para control del escáner
+    match /users/{userId}/scanner_control/status {
+      allow read: if isOwner(userId);
+      
+      allow create: if isOwner(userId)
+        && (!request.resource.data.keys().hasAny(['scan_in_progress', 'last_scan_time']))
+        && (request.resource.data.scan_requested is bool);
+
+      allow update: if isOwner(userId)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['scan_in_progress', 'last_scan_time']))
+        && (request.resource.data.scan_requested is bool);
+    }
+
     // Default deny for everything else
     match /{document=**} {
       allow read, write: if false;

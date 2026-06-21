@@ -248,10 +248,73 @@ async function runScan() {
     } else {
       console.log('[-] No updates required in Firestore.');
     }
+    
+    // Send heartbeat with scan duration and completion timestamp
+    await sendHeartbeat(duration, Date.now());
   } catch (error) {
     console.error('[ERROR] Failed to sync data with Firestore:', error);
   }
 }
+
+// 8.5. Send Heartbeat to Firebase
+async function sendHeartbeat(lastScanDuration = null, lastScanTime = null) {
+  if (!db) return;
+  try {
+    const interfaces = os.networkInterfaces();
+    let scannerIp = 'unknown';
+    let scannerSubnet = 'unknown';
+    let interfaceName = 'unknown';
+
+    for (const name of Object.keys(interfaces)) {
+      for (const netInterface of interfaces[name]) {
+        if (netInterface.family === 'IPv4' && !netInterface.internal) {
+          const ip = netInterface.address;
+          if (ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.')) {
+            scannerIp = ip;
+            const octets = ip.split('.');
+            scannerSubnet = `${octets[0]}.${octets[1]}.${octets[2]}.x`;
+            interfaceName = name;
+            break;
+          }
+        }
+      }
+      if (scannerIp !== 'unknown') break;
+    }
+
+    const docRef = db.collection('users').doc(userId).collection('scanner_control').doc('status');
+    const scannerKey = os.hostname().replace(/[./#$[\]]/g, '_');
+    
+    const scannerData = {
+      last_heartbeat: admin.firestore.FieldValue.serverTimestamp(),
+      scanner_ip: scannerIp,
+      scanner_subnet: scannerSubnet,
+      scanner_interface: interfaceName,
+      scanner_hostname: os.hostname(),
+      scanner_os: `${os.type()} ${os.release()} (${os.arch()})`
+    };
+
+    if (lastScanDuration !== null) {
+      scannerData.last_scan_duration = parseFloat(lastScanDuration);
+    }
+    if (lastScanTime !== null) {
+      scannerData.last_scan_time = admin.firestore.Timestamp.fromDate(new Date(lastScanTime));
+    }
+
+    const updateData = {
+      scanners: {
+        [scannerKey]: scannerData
+      }
+    };
+
+    await docRef.set(updateData, { merge: true });
+  } catch (error) {
+    console.error('[ERROR] Failed to send heartbeat to Firestore:', error);
+  }
+}
+
+// Start heartbeat loop (every 30 seconds)
+sendHeartbeat();
+setInterval(() => sendHeartbeat(), 30 * 1000);
 
 // Start initial scan and set interval
 runScan();
@@ -340,6 +403,9 @@ async function startScanRequestListener() {
   if (!db) return;
   console.log('[-] Starting Scan Request listener...');
   
+  let lastScanTime = 0;
+  const MIN_SCAN_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes cooldown
+  
   const docRef = db.collection('users').doc(userId).collection('scanner_control').doc('status');
   try {
     const docSnap = await docRef.get();
@@ -359,6 +425,33 @@ async function startScanRequestListener() {
     const data = docSnap.data();
     
     if (data.scan_requested && !data.scan_in_progress) {
+      // Check cooldown
+      let firestoreLastScanTime = 0;
+      if (data.last_scan_time) {
+        firestoreLastScanTime = typeof data.last_scan_time.toDate === 'function'
+          ? data.last_scan_time.toDate().getTime()
+          : new Date(data.last_scan_time).getTime();
+      }
+      
+      const effectiveLastScanTime = Math.max(lastScanTime, firestoreLastScanTime);
+      const now = Date.now();
+      const timeSinceLastScan = now - effectiveLastScanTime;
+      
+      if (timeSinceLastScan < MIN_SCAN_COOLDOWN_MS) {
+        const remainingSeconds = Math.ceil((MIN_SCAN_COOLDOWN_MS - timeSinceLastScan) / 1000);
+        console.warn(`[Scanner] Manual scan requested too soon. Cooldown active. Ignored. (${remainingSeconds}s remaining)`);
+        
+        // Reset the scan_requested flag in Firestore
+        try {
+          await docRef.update({
+            scan_requested: false
+          });
+        } catch (updateErr) {
+          console.error('[Scanner] Failed to reset scan_requested flag during cooldown:', updateErr);
+        }
+        return;
+      }
+      
       console.log('\n[Scanner] Manual scan requested via Firestore!');
       try {
         // Set scan_in_progress to true and reset request flag
@@ -369,6 +462,7 @@ async function startScanRequestListener() {
         
         // Execute the scan
         await runScan();
+        lastScanTime = Date.now(); // Update local cooldown timestamp
         
         // Mark scan as completed and record timestamp
         await docRef.update({

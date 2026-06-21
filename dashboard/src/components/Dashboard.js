@@ -4,7 +4,21 @@ import React, { useState, useEffect } from "react";
 import { collection, onSnapshot, query, doc, updateDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import NodeCard from "./NodeCard";
-import { LogOut, Search, Activity, Network, ServerCrash, RefreshCw, Sun, Moon, ExternalLink } from "lucide-react";
+import { LogOut, Search, Activity, Network, ServerCrash, RefreshCw, Sun, Moon, ExternalLink, ChevronDown, ChevronUp, Wifi, WifiOff, AlertTriangle } from "lucide-react";
+
+function getRelativeTimeString(date) {
+  if (!date) return "Nunca";
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+
+  if (diffMins < 1) return "hace un momento";
+  if (diffMins < 60) return `hace ${diffMins}m`;
+  if (diffHours < 24) return `hace ${diffHours}h`;
+  
+  return date.toLocaleDateString();
+}
 
 export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }) {
   const [nodes, setNodes] = useState([]);
@@ -14,11 +28,13 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
   const [isSyncing, setIsSyncing] = useState(false);
   const [viewMode, setViewMode] = useState("devices"); // "devices" | "services"
   const [showCommon, setShowCommon] = useState(false);
+  const [showScannersPanel, setShowScannersPanel] = useState(false);
   
   const [scanStatus, setScanStatus] = useState({
     scan_requested: false,
     scan_in_progress: false,
-    last_scan_time: null
+    last_scan_time: null,
+    scanners: {}
   });
 
   // Listen to manual scan control status
@@ -159,6 +175,24 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
     return Object.values(servicesMap).filter(service => service.devices.length > 0);
   };
 
+  const scanners = scanStatus.scanners || {};
+  
+  // Calculate scanner list and their online status
+  const scannerList = Object.values(scanners).map(scanner => {
+    const lastHeartbeat = scanner.last_heartbeat 
+      ? new Date(scanner.last_heartbeat.seconds * 1000) 
+      : null;
+    const isOnline = lastHeartbeat && (Date.now() - lastHeartbeat.getTime() < 120 * 1000); // 2 minutes
+    return {
+      ...scanner,
+      lastHeartbeatDate: lastHeartbeat,
+      isOnline
+    };
+  });
+
+  const onlineScanners = scannerList.filter(s => s.isOnline);
+  const isAnyScannerOnline = onlineScanners.length > 0;
+
   return (
     <div className="min-h-screen bg-white dark:bg-black text-zinc-900 dark:text-zinc-100 flex flex-col pb-12 transition-colors duration-200">
       
@@ -216,6 +250,131 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
       {/* Main dashboard content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 w-full flex-grow">
         
+        {/* Warning Banner when all scanners are offline */}
+        {!isAnyScannerOnline && (
+          <div className="mb-6 p-4 border border-red-500/20 dark:border-red-500/10 bg-red-500/5 rounded-xl flex items-start gap-3 text-xs font-mono text-red-650 dark:text-red-400 animate-pulse-subtle">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-red-600 dark:text-red-500" />
+            <div>
+              <span className="font-bold uppercase tracking-wider">Sin Escáneres Activos:</span> El monitor no está recibiendo actualizaciones. Asegúrate de ejecutar <code className="bg-red-500/15 px-1.5 py-0.5 rounded text-red-700 dark:text-red-300 font-bold">run-scanner.bat</code> en tu red local.
+            </div>
+          </div>
+        )}
+
+        {/* Scanners Status & List Panel */}
+        <div className="mb-6 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50/30 dark:bg-zinc-950/10 overflow-hidden transition-all duration-200">
+          <button
+            onClick={() => setShowScannersPanel(!showScannersPanel)}
+            className="w-full p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left font-mono text-xs cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-950/35 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              {isAnyScannerOnline ? (
+                <div className="w-8 h-8 rounded border border-emerald-500/20 bg-emerald-500/5 flex items-center justify-center text-emerald-600 dark:text-emerald-500">
+                  <Wifi className="w-4 h-4 animate-pulse-green" />
+                </div>
+              ) : (
+                <div className="w-8 h-8 rounded border border-red-500/20 bg-red-500/5 flex items-center justify-center text-red-600 dark:text-red-500">
+                  <WifiOff className="w-4 h-4" />
+                </div>
+              )}
+              <div>
+                <h4 className="font-bold text-zinc-900 dark:text-zinc-50 text-xs uppercase tracking-wider flex items-center gap-2">
+                  <span>Escáneres de Red</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                    isAnyScannerOnline 
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
+                      : "bg-red-500/10 text-red-600 dark:text-red-400"
+                  }`}>
+                    {onlineScanners.length} activo{onlineScanners.length === 1 ? '' : 's'}
+                  </span>
+                </h4>
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+                  {isAnyScannerOnline 
+                    ? `Monitoreando subred: ${onlineScanners.map(s => s.scanner_subnet).filter((v, i, a) => a.indexOf(v) === i).join(', ')}`
+                    : "No hay escáneres reportando actividad"
+                  }
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 text-zinc-500 dark:text-zinc-400 text-[11px] self-end sm:self-center">
+              <span className="hidden md:inline">
+                {isAnyScannerOnline ? "Click para ver detalles de los equipos" : "Click para expandir"}
+              </span>
+              {showScannersPanel ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </div>
+          </button>
+
+          {showScannersPanel && (
+            <div className="border-t border-zinc-200 dark:border-zinc-800 p-4 bg-zinc-50/50 dark:bg-zinc-950/20 transition-all duration-300">
+              {scannerList.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {scannerList.map((scanner) => (
+                    <div 
+                      key={scanner.scanner_hostname + "_" + scanner.scanner_ip} 
+                      className={`border rounded-lg p-3 bg-white dark:bg-black font-mono text-[11px] flex flex-col justify-between transition-colors ${
+                        scanner.isOnline 
+                          ? "border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40" 
+                          : "border-zinc-200 dark:border-zinc-800 opacity-60 hover:opacity-100"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-900 pb-1.5 mb-2">
+                          <span className="font-bold text-zinc-900 dark:text-zinc-100 truncate block max-w-[70%]">
+                            {scanner.scanner_hostname}
+                          </span>
+                          <span className={`flex items-center gap-1 text-[9px] uppercase font-bold ${
+                            scanner.isOnline ? "text-emerald-600 dark:text-emerald-505" : "text-zinc-400 dark:text-zinc-550"
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${scanner.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-400'}`} />
+                            {scanner.isOnline ? "activo" : "inactivo"}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5 text-zinc-600 dark:text-zinc-400">
+                          <div>
+                            <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase text-[9px]">IP:</span>{" "}
+                            {scanner.scanner_ip} <span className="text-[10px] text-zinc-450">({scanner.scanner_interface})</span>
+                          </div>
+                          <div>
+                            <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase text-[9px]">Subred:</span>{" "}
+                            {scanner.scanner_subnet}
+                          </div>
+                          <div>
+                            <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase text-[9px]">SO:</span>{" "}
+                            <span className="text-[10px] truncate block" title={scanner.scanner_os}>{scanner.scanner_os}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 pt-2 border-t border-dashed border-zinc-100 dark:border-zinc-900 text-[10px] text-zinc-500 dark:text-zinc-400 flex flex-col gap-0.5">
+                        <div>
+                          <span className="font-bold text-zinc-400">Actividad:</span>{" "}
+                          {getRelativeTimeString(scanner.lastHeartbeatDate)}
+                        </div>
+                        {scanner.last_scan_duration && (
+                          <div>
+                            <span className="font-bold text-zinc-400">Último escaneo:</span>{" "}
+                            {scanner.last_scan_duration}s{" "}
+                            {scanner.last_scan_time && (
+                              <span className="text-[9px] text-zinc-450 font-normal">
+                                ({getRelativeTimeString(new Date(scanner.last_scan_time.seconds * 1000))})
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-6 text-center text-zinc-400 dark:text-zinc-500 font-mono text-xs">
+                  Aún no se han registrado escáneres en la base de datos.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Statistics cards */}
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           
