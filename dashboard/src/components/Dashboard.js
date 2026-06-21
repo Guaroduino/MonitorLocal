@@ -6,6 +6,16 @@ import { db } from "../lib/firebase";
 import NodeCard from "./NodeCard";
 import { LogOut, Search, Activity, Network, ServerCrash, RefreshCw, Sun, Moon, ExternalLink, ChevronDown, ChevronUp, Wifi, WifiOff, AlertTriangle } from "lucide-react";
 
+// Service map fallback
+const SERVICE_NAMES = {
+  22: "SSH",
+  80: "HTTP",
+  443: "HTTPS",
+  3000: "Open WebUI",
+  8188: "ComfyUI",
+  11434: "Ollama"
+};
+
 function getRelativeTimeString(date) {
   if (!date) return "Nunca";
   const now = new Date();
@@ -147,14 +157,7 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
   });
 
   const getGroupedServices = () => {
-    const servicesMap = {
-      11434: { name: "Ollama", port: 11434, devices: [] },
-      8188: { name: "ComfyUI", port: 8188, devices: [] },
-      3000: { name: "Open WebUI", port: 3000, devices: [] },
-      22: { name: "SSH", port: 22, devices: [] },
-      80: { name: "HTTP", port: 80, devices: [] },
-      443: { name: "HTTPS", port: 443, devices: [] }
-    };
+    const servicesMap = {};
 
     filteredNodes.forEach(node => {
       const lastSeen = node.last_seen ? node.last_seen.seconds * 1000 : 0;
@@ -162,11 +165,23 @@ export default function Dashboard({ user, onLogout, isDarkMode, toggleDarkMode }
       
       if (isOnline && node.ports && node.ports.length > 0) {
         node.ports.forEach(port => {
-          if (servicesMap[port]) {
-            servicesMap[port].devices.push(node);
-          } else {
-            servicesMap[port] = { name: `Puerto ${port}`, port: port, devices: [] };
-            servicesMap[port].devices.push(node);
+          const customName = node.services && node.services[port];
+          const serviceName = customName || SERVICE_NAMES[port] || `Puerto ${port}`;
+          const isFallback = node.services_fallback && node.services_fallback[port] === true;
+
+          // Unique key for the grouping: combination of service name and port
+          const key = `${serviceName}-${port}`;
+
+          if (!servicesMap[key]) {
+            servicesMap[key] = { name: serviceName, port: port, devices: [] };
+          }
+          
+          // Avoid duplicate devices in the same service group
+          if (!servicesMap[key].devices.some(d => d.id === node.id)) {
+            servicesMap[key].devices.push({
+              ...node,
+              _service_fallback: isFallback
+            });
           }
         });
       }
@@ -574,8 +589,14 @@ function ServiceCard({ service }) {
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                    <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate block">
+                    <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate flex items-center gap-1">
                       {displayTitle}
+                      {device._service_fallback && (
+                        <AlertTriangle 
+                          className="w-3 h-3 text-amber-500 animate-pulse shrink-0" 
+                          title="Este servicio no respondió a la petición de título. Se está mostrando el valor predeterminado." 
+                        />
+                      )}
                     </span>
                   </div>
                   {hasSubLabel && (

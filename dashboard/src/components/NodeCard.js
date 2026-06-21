@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Clock, Edit2, Check, X, Power } from "lucide-react";
+import { Clock, Edit2, Check, X, Power, AlertTriangle } from "lucide-react";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 
@@ -279,19 +279,30 @@ export default function NodeCard({ node, userId }) {
           </div>
           {node.ports && node.ports.length > 0 ? (
             <div className="space-y-1">
-              {node.ports.map((port) => (
-                <div 
-                  key={port} 
-                  className="flex items-center gap-2 text-xs font-mono text-zinc-700 dark:text-zinc-300"
-                >
-                  <span className="text-red-600 dark:text-red-500 font-bold min-w-[42px] border-r border-zinc-200 dark:border-zinc-800 pr-1.5 text-right">
-                    {port}
-                  </span>
-                  <span className="text-zinc-800 dark:text-zinc-200 font-medium">
-                    {SERVICE_NAMES[port] || "Servicio Desconocido"}
-                  </span>
-                </div>
-              ))}
+              {node.ports.map((port) => {
+                const serviceName = (node.services && node.services[port]) || SERVICE_NAMES[port] || "Servicio Desconocido";
+                const isFallback = node.services_fallback && node.services_fallback[port] === true;
+
+                return (
+                  <div 
+                    key={port} 
+                    className="flex items-center gap-2 text-xs font-mono text-zinc-700 dark:text-zinc-300"
+                  >
+                    <span className="text-red-650 dark:text-red-500 font-bold min-w-[42px] border-r border-zinc-200 dark:border-zinc-800 pr-1.5 text-right font-mono">
+                      {port}
+                    </span>
+                    <span className="text-zinc-800 dark:text-zinc-200 font-medium flex items-center gap-1.5">
+                      {serviceName}
+                      {isFallback && (
+                        <AlertTriangle 
+                          className="w-3.5 h-3.5 text-amber-500 animate-pulse" 
+                          title="Este servicio no respondió a la petición de título. Se está mostrando el valor predeterminado." 
+                        />
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="flex items-center gap-1 py-1 text-xs text-zinc-400 dark:text-zinc-500 italic font-mono">

@@ -4,9 +4,19 @@ const path = require('path');
 const dns = require('dns').promises;
 const dgram = require('dgram');
 const admin = require('firebase-admin');
+const http = require('http');
+const https = require('https');
 
 // 1. Initial Configurations
 const PORTS_TO_SCAN = [11434, 3000, 80, 443, 22, 8188]; // Ollama, Open WebUI, HTTP, HTTPS, SSH, ComfyUI
+const DEFAULT_SERVICE_NAMES = {
+  22: "SSH",
+  80: "HTTP",
+  443: "HTTPS",
+  3000: "Open WebUI",
+  8188: "ComfyUI",
+  11434: "Ollama"
+};
 const CONCURRENCY_LIMIT = 50; // Max simultaneous TCP connections
 const SCAN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes (standard interval)
 const SOCKET_TIMEOUT = 1000; // 1 second timeout per connection
@@ -76,26 +86,146 @@ function detectSubnet() {
 // 4. Single TCP Port Connection Check
 function checkPort(ip, port, timeout = SOCKET_TIMEOUT) {
   return new Promise((resolve) => {
+    let resolved = false;
     const socket = new net.Socket();
     
+    // Backup timer to guarantee resolution even if the socket hangs
+    const backupTimer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        try { socket.destroy(); } catch (e) {}
+        resolve({ port, open: false });
+      }
+    }, timeout + 500);
+
     socket.setTimeout(timeout);
 
     socket.once('connect', () => {
-      socket.destroy();
-      resolve({ port, open: true });
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(backupTimer);
+        try { socket.destroy(); } catch (e) {}
+        resolve({ port, open: true });
+      }
     });
 
     socket.once('timeout', () => {
-      socket.destroy();
-      resolve({ port, open: false });
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(backupTimer);
+        try { socket.destroy(); } catch (e) {}
+        resolve({ port, open: false });
+      }
     });
 
     socket.once('error', () => {
-      socket.destroy();
-      resolve({ port, open: false });
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(backupTimer);
+        try { socket.destroy(); } catch (e) {}
+        resolve({ port, open: false });
+      }
     });
 
-    socket.connect(port, ip);
+    try {
+      socket.connect(port, ip);
+    } catch (err) {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(backupTimer);
+        try { socket.destroy(); } catch (e) {}
+        resolve({ port, open: false });
+      }
+    }
+  });
+}
+
+// 4.5. Helper to probe HTTP/HTTPS services and identify them by HTML title or signature
+function probeHttpService(ip, port, timeout = 1500) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    let req;
+
+    // Global backup timer to guarantee resolution under any hung socket scenario
+    const backupTimer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        console.warn(`[Scanner] Warning: Probe timed out via backup timer for ${ip}:${port}`);
+        if (req) {
+          try { req.destroy(); } catch (err) {}
+        }
+        resolve(null);
+      }
+    }, timeout + 500);
+
+    // Helper to parse title or signatures from HTML content
+    const parseTitle = (html) => {
+      const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+      if (titleMatch && titleMatch[1]) {
+        const title = titleMatch[1].trim();
+        return title.replace(/\s+/g, ' ');
+      } else if (html.includes('Ollama is running')) {
+        return 'Ollama';
+      }
+      return null;
+    };
+
+    try {
+      const isHttps = port === 443;
+      const client = isHttps ? https : http;
+      const url = `${isHttps ? 'https' : 'http'}://${ip}:${port}/`;
+
+      req = client.get(url, { timeout }, (res) => {
+        let data = '';
+        
+        // Limit data size to 10KB to avoid reading huge payloads
+        res.on('data', (chunk) => {
+          data += chunk;
+          if (data.length > 10240) {
+            try { req.destroy(); } catch (err) {}
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(backupTimer);
+              resolve(parseTitle(data));
+            }
+          }
+        });
+
+        res.on('end', () => {
+          clearTimeout(backupTimer);
+          if (resolved) return;
+          resolved = true;
+          resolve(parseTitle(data));
+        });
+      });
+
+      req.on('error', () => {
+        clearTimeout(backupTimer);
+        try { req.destroy(); } catch (err) {}
+        if (!resolved) {
+          resolved = true;
+          resolve(null);
+        }
+      });
+
+      req.on('timeout', () => {
+        clearTimeout(backupTimer);
+        try { req.destroy(); } catch (err) {}
+        if (!resolved) {
+          resolved = true;
+          resolve(null);
+        }
+      });
+    } catch (err) {
+      clearTimeout(backupTimer);
+      if (req) {
+        try { req.destroy(); } catch (e) {}
+      }
+      if (!resolved) {
+        resolved = true;
+        resolve(null);
+      }
+    }
   });
 }
 
@@ -175,14 +305,37 @@ async function runScan() {
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   console.log(`[-] Scan completed in ${duration} seconds.`);
 
-  // Filter out nodes that have open ports and resolve hostnames in parallel
+  // Filter out nodes that have open ports
   const scannedActiveNodes = scanResults.filter(node => node.openPorts.length > 0);
-  console.log(`[-] Resolving hostnames for ${scannedActiveNodes.length} active node(s)...`);
+  console.log(`[-] Resolving hostnames and services for ${scannedActiveNodes.length} active node(s)...`);
   
   const activeNodes = await Promise.all(
     scannedActiveNodes.map(async (node) => {
       const hostname = await resolveHostname(node.ip);
-      return { ...node, hostname };
+      
+      const services = {};
+      const services_fallback = {};
+      
+      for (const port of node.openPorts) {
+        if ([80, 443, 3000, 8188, 11434].includes(port)) {
+          const detectedName = await probeHttpService(node.ip, port);
+          if (detectedName) {
+            services[port] = detectedName;
+            services_fallback[port] = false;
+          } else {
+            services[port] = DEFAULT_SERVICE_NAMES[port] || `Puerto ${port}`;
+            services_fallback[port] = true;
+          }
+        } else if (port === 22) {
+          services[port] = "SSH";
+          services_fallback[port] = false;
+        } else {
+          services[port] = DEFAULT_SERVICE_NAMES[port] || `Puerto ${port}`;
+          services_fallback[port] = false;
+        }
+      }
+
+      return { ...node, hostname, services, services_fallback };
     })
   );
 
@@ -217,6 +370,8 @@ async function runScan() {
       batch.set(docRef, {
         ip: node.ip,
         ports: node.openPorts,
+        services: node.services || {},
+        services_fallback: node.services_fallback || {},
         last_seen: admin.firestore.FieldValue.serverTimestamp(),
         hostname: node.hostname || null
       }, { merge: true });
@@ -235,7 +390,9 @@ async function runScan() {
         console.log(`[-] Cleaning up offline node: ${ip} (No active ports detected)`);
         const docRef = collectionRef.doc(ip);
         batch.set(docRef, {
-          ports: []
+          ports: [],
+          services: {},
+          services_fallback: {}
           // We preserve the last_seen so the dashboard can verify offline status duration
         }, { merge: true });
         batchOperations++;
@@ -404,6 +561,7 @@ async function startScanRequestListener() {
   console.log('[-] Starting Scan Request listener...');
   
   let lastScanTime = 0;
+  let isExecutingManualScan = false;
   const MIN_SCAN_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes cooldown
   
   const docRef = db.collection('users').doc(userId).collection('scanner_control').doc('status');
@@ -413,8 +571,27 @@ async function startScanRequestListener() {
       await docRef.set({
         scan_requested: false,
         scan_in_progress: false,
+        scan_in_progress_by: null,
         last_scan_time: null
       });
+    } else {
+      // Clean up any stuck states from a previous run on startup
+      const data = docSnap.data();
+      const updates = {};
+      
+      if (data.scan_in_progress && (!data.scan_in_progress_by || data.scan_in_progress_by === os.hostname())) {
+        console.log('[Scanner] Resetting stuck scan_in_progress flag on startup.');
+        updates.scan_in_progress = false;
+        updates.scan_in_progress_by = null;
+      }
+      
+      if (data.scan_requested) {
+        updates.scan_requested = false;
+      }
+      
+      if (Object.keys(updates).length > 0) {
+        await docRef.update(updates);
+      }
     }
   } catch (err) {
     console.error('[Scanner] Failed to initialize scanner_control collection:', err);
@@ -423,6 +600,20 @@ async function startScanRequestListener() {
   docRef.onSnapshot(async (docSnap) => {
     if (!docSnap.exists) return;
     const data = docSnap.data();
+    
+    // Auto-heal: If Firestore reports scan in progress by this host, but we are actually idle
+    if (data.scan_in_progress && data.scan_in_progress_by === os.hostname() && !isExecutingManualScan) {
+      console.warn('[Scanner] Auto-healing: Firestore reports scan_in_progress: true for this host, but scanner is idle. Resetting.');
+      try {
+        await docRef.update({
+          scan_in_progress: false,
+          scan_in_progress_by: null
+        });
+      } catch (updateErr) {
+        console.error('[Scanner] Failed to auto-heal stuck scan_in_progress flag:', updateErr);
+      }
+      return;
+    }
     
     if (data.scan_requested && !data.scan_in_progress) {
       // Check cooldown
@@ -454,28 +645,40 @@ async function startScanRequestListener() {
       
       console.log('\n[Scanner] Manual scan requested via Firestore!');
       try {
-        // Set scan_in_progress to true and reset request flag
+        isExecutingManualScan = true;
+        
+        // Set scan_in_progress to true, specify owner, and reset request flag
         await docRef.update({
           scan_requested: false,
-          scan_in_progress: true
+          scan_in_progress: true,
+          scan_in_progress_by: os.hostname()
         });
         
         // Execute the scan
         await runScan();
         lastScanTime = Date.now(); // Update local cooldown timestamp
         
+        isExecutingManualScan = false;
+        
         // Mark scan as completed and record timestamp
         await docRef.update({
           scan_in_progress: false,
+          scan_in_progress_by: null,
           last_scan_time: admin.firestore.FieldValue.serverTimestamp()
         });
         console.log('[Scanner] Manual scan completed.');
       } catch (err) {
         console.error('[Scanner] Manual scan execution failed:', err);
-        await docRef.update({
-          scan_in_progress: false,
-          scan_requested: false
-        });
+        isExecutingManualScan = false;
+        try {
+          await docRef.update({
+            scan_in_progress: false,
+            scan_in_progress_by: null,
+            scan_requested: false
+          });
+        } catch (updateErr) {
+          console.error('[Scanner] Failed to reset flags after execution error:', updateErr);
+        }
       }
     }
   }, (error) => {
